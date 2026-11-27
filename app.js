@@ -37,16 +37,78 @@ function detail(r,img){
 $('#close').onclick=()=>$('#detail').close();
 $('#gps').onclick=()=>navigator.geolocation.getCurrentPosition(p=>{f.lat.value=p.coords.latitude;f.lng.value=p.coords.longitude;msg('บันทึกพิกัดแล้ว')},()=>msg('อ่านตำแหน่งไม่ได้ กรุณาอนุญาตหรือกรอกพิกัดเอง'),{enableHighAccuracy:true,timeout:15000});
 async function resize(file){const bitmap=await createImageBitmap(file);let scale=Math.min(1,1280/Math.max(bitmap.width,bitmap.height));const c=document.createElement('canvas');c.width=Math.max(1,Math.round(bitmap.width*scale));c.height=Math.max(1,Math.round(bitmap.height*scale));c.getContext('2d').drawImage(bitmap,0,0,c.width,c.height);bitmap.close();return c.toDataURL('image/jpeg',.8).split(',')[1]}
-f.onsubmit=async e=>{e.preventDefault();const btn=f.querySelector('.primary');btn.disabled=true;msg('กำลังส่งรายการ…');try{await api('submit',{id,name:f.customer.value,phone:f.phone.value,product:f.product.value,loc:[Number(f.lat.value),Number(f.lng.value)],photo:await resize(f.photo.files[0])});id=crypto.randomUUID();f.reset();await page('today')}catch(err){showError(err)}finally{btn.disabled=false}};
 function filterRows(){const q=$('#query').value.trim().toLowerCase();for(const g of document.querySelectorAll('#list>section')){let count=0;for(const row of g.querySelectorAll('.record')){row.hidden=!row.dataset.find.includes(q);if(!row.hidden)count++}g.hidden=!count;g.querySelector('h2 small').textContent=count}} $('#query').oninput=filterRows;$('#search').onclick=()=>{const f=$('#filter');f.hidden=!f.hidden;if(f.hidden){$('#query').value='';filterRows()}else $('#query').focus()};$('#news').onclick=()=>page('news');$('#refresh').onclick=()=>{if(user)page(mode);else location.reload()};$('#newBtn').onclick=()=>page('new');$('#today').onclick=()=>page('today');$('#all').onclick=()=>page('all');
-(async()=>{try{
- if(!CONFIG.liffId||!CONFIG.api)throw Error('กรุณาตั้งค่า LIFF ID และ URL ของ Apps Script ใน config.js');
- if(!window.liff)throw Error('โหลด LINE SDK ไม่สำเร็จ กรุณาตรวจอินเทอร์เน็ตแล้วรีเฟรช');
+const storageKey='pbd-demo:'+new URL('.',location.href).pathname+':'+CONFIG.liffId;
+let owner='',onlineSession=false,busy=false,syncNote='',dbPromise;
+function database(){
+ if(!dbPromise)dbPromise=new Promise((resolve,reject)=>{
+  const req=indexedDB.open(storageKey,1);
+  req.onupgradeneeded=()=>req.result.createObjectStore('outbox',{keyPath:'id'});
+  req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)
+ });return dbPromise
+}
+async function stored(method,value){
+ const db=await database();
+ return new Promise((resolve,reject)=>{
+  const tx=db.transaction('outbox',method==='getAll'?'readonly':'readwrite');
+  const store=tx.objectStore('outbox'),req=method==='getAll'?store.getAll():store[method](value);
+  tx.oncomplete=()=>resolve(req.result);tx.onabort=()=>reject(tx.error||Error('บันทึกในเครื่องไม่สำเร็จ'));
+ })
+}
+async function pending(){return (await stored('getAll')).filter(x=>x.owner===owner).sort((a,b)=>a.capturedAt-b.capturedAt)}
+async function displayQueue(){
+ const jobs=await pending(),box=$('#outbox');box.replaceChildren();
+ if(!jobs.length&&!syncNote)return;
+ const title=document.createElement('b');title.textContent=jobs.length?'รอซิงค์ '+jobs.length+' รายการ':syncNote;box.append(title);
+ for(const j of jobs){const line=document.createElement('div');line.textContent=j.name+' · '+j.product+' · '+new Date(j.capturedAt).toLocaleString('th-TH');box.append(line)}
+ if(jobs.length&&syncNote){const note=document.createElement('div');note.textContent=syncNote;box.append(note)}
+}
+async function flush(){
+ if(!owner||busy||!navigator.onLine)return;
+ busy=true;let sent=0;
+ try{
+  const jobs=await pending();if(!jobs.length)return;
+  if(!onlineSession){await authenticate();if(!onlineSession)return}
+  for(const job of jobs){
+   if(job.owner!==owner)continue;
+   try{const ack=await api('submit',job);
+    if(ack!==job.id)throw Error('ยังไม่ได้รับการยืนยันจากเซิร์ฟเวอร์');
+    await stored('delete',job.id);sent++;syncNote='ซิงค์สำเร็จ'
+   }catch(e){syncNote='รอซิงค์ · '+e.message;if(/LINE|บัญชี/.test(e.message))onlineSession=false}
+  }
+  if(sent&&['all','today'].includes(mode))await page(mode)
+ }catch(e){syncNote=e.message}finally{busy=false;await displayQueue().catch(showError)}
+}
+async function authenticate(){
+ if(!window.liff){await new Promise((ok,no)=>{const script=document.createElement('script');script.src='https://static.line-scdn.net/liff/edge/2/sdk.js';script.onload=ok;script.onerror=()=>no(Error('โหลด LINE ไม่สำเร็จ'));document.head.append(script)})}
  await liff.init({liffId:CONFIG.liffId,withLoginOnExternalBrowser:true});
- if(!liff.isLoggedIn()){if(liff.isInClient())throw Error('กรุณาเปิดแอปอีกครั้งจากลิงก์ LIFF ใน LINE');liff.login();return}
- if(!liff.getIDToken())throw Error('กรุณาเปิด scope openid ใน LIFF และอนุญาตให้แอปยืนยันตัวตน');
- const data=await api('init');user=data.user;if(admin&&user[2]==='sales')throw Error('หน้านี้สำหรับผู้ตรวจ');
- $('#staff').textContent=user[0];$('#team').textContent=user[1];$('#who').textContent=user[0]+' · '+user[1];for(const p of ['',...data.products])f.product.add(new Option(p||'เลือกสินค้า',p));
- $('#app').hidden=false;$('#newBtn').hidden=admin;await page('all')
- }catch(err){showError(err)}})();
-if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+ if(!liff.isLoggedIn()){liff.login();return}
+ const data=await api('init');if(!data.owner)throw Error('กรุณาอัปเดต Code.gs และ Deploy เวอร์ชันใหม่');
+ applyProfile(data);onlineSession=true;localStorage.setItem(storageKey,JSON.stringify(data))
+}
+function applyProfile(data){
+ if(admin&&data.user[2]==='sales')throw Error('หน้านี้สำหรับผู้ตรวจ');
+ if(owner&&owner!==data.owner){f.reset();id=crypto.randomUUID();$('#outbox').replaceChildren()}
+ owner=data.owner;user=data.user;$('#staff').textContent=user[0];$('#team').textContent=user[1];$('#who').textContent=user[0]+' · '+user[1];
+ f.product.replaceChildren();for(const p of ['',...data.products])f.product.add(new Option(p||'เลือกสินค้า',p));
+ $('#app').hidden=false;$('#newBtn').hidden=admin
+}
+f.onsubmit=async e=>{
+ e.preventDefault();const btn=f.querySelector('.primary');btn.disabled=true;
+ try{
+ const job={id,owner,capturedAt:Date.now(),name:f.customer.value,phone:f.phone.value,product:f.product.value,loc:[Number(f.lat.value),Number(f.lng.value)],photo:await resize(f.photo.files[0])};
+ await stored('put',job);id=crypto.randomUUID();f.reset();syncNote='บันทึกในเครื่องแล้ว';msg('');await displayQueue();await flush()
+ }catch(e){msg('บันทึกรายการไม่สำเร็จ · '+e.message)}finally{btn.disabled=false}
+};
+(async()=>{
+ try{
+ if(!CONFIG.api||!CONFIG.liffId)throw Error('กรุณาตั้งค่า config.js');
+ if(navigator.onLine){
+  try{await authenticate()}catch(err){if(navigator.onLine&&!(err instanceof TypeError))throw err}
+ }
+ if(!onlineSession){const saved=JSON.parse(localStorage.getItem(storageKey)||'null');if(!saved||!saved.owner||admin)throw Error('กรุณาเปิดแอปและเข้าสู่ระบบขณะออนไลน์ก่อน');applyProfile(saved)}
+ await page(onlineSession?'all':'new');await displayQueue();await flush()
+ }catch(e){showError(e)}
+})();
+window.addEventListener('online',flush);document.addEventListener('visibilitychange',()=>{if(!document.hidden)flush()});setInterval(flush,30000);
+if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>msg('เครื่องนี้ยังเปิดแอปใหม่ขณะออฟไลน์ไม่ได้'));
