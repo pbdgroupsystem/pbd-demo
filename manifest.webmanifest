@@ -1,6 +1,6 @@
 {
-  "name": "บันทึกสาธิตพนักงานขาย",
-  "short_name": "บันทึกสาธิต",
+  "name": "PBD DEMO",
+  "short_name": "PBD DEMO",
   "lang": "th",
   "start_url": "./index.html",
   "scope": "./",

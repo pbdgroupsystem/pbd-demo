@@ -1,4 +1,4 @@
-const scope=new URL(self.registration.scope),prefix='pbd-shell:'+scope.pathname+':',cacheName=prefix+'1';
+const scope=new URL(self.registration.scope),prefix='pbd-shell:'+scope.pathname+':',cacheName=prefix+'4';
 const files=['./index.html','./admin.html','./config.js','./app.js','./style.css','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(cacheName).then(cache=>cache.addAll(files)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith(prefix)&&k!==cacheName).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
