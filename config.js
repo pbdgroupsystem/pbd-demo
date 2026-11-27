@@ -1,1 +1,1 @@
-window.CONFIG={liffId:"https://liff.line.me/2012225566-a27Tzofk",api:""};
+window.CONFIG={liffId:"2012225566-a27Tzofk",api:""};
